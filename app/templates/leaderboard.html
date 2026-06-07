@@ -24,7 +24,7 @@
                         {{ loop.index }}
                     </span>
                 </td>
-                <td><strong>{{ op.operator }}</strong></td>
+                <td><a href="{{ url_for('main.operator_page', callsign=op.operator) }}">{{ op.operator }}</a></td>
                 <td>{{ op.total_score }}</td>
                 <td>{{ op.total_contacts }}</td>
             </tr>
