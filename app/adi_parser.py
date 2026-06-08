@@ -72,6 +72,12 @@ def _parse_record(raw_text: str) -> ADIFRecord | None:
 
         if tag_name == "my_call":
             record.submitted_by = value
+        elif tag_name == "station_callsign" and not record.submitted_by:
+            # QRZLogbook uses STATION_CALLSIGN instead of MY_CALL
+            record.submitted_by = value
+        elif tag_name == "operator" and not record.submitted_by:
+            # Some exporters use OPERATOR field
+            record.submitted_by = value
         elif tag_name == "call":
             record.contact_call = value
         elif tag_name == "qso_date":
@@ -234,18 +240,35 @@ def parse_adi_file(content: str) -> ADIFParseResult:
     if "<EOD>" not in text:
         result.warnings.append("File does not end with <EOD>. This may indicate an incomplete or malformed file.")
 
-    # Split into individual records by <EOC> delimiter (inter-record separator)
-    raw_records = re.split(r"<EOC>", text)
+    # Determine record separation strategy based on format detection
+    raw_records = []
+    
+    # Traditional ADIF: records separated by <EOC>, fields within each record separated by <EOR>
+    if "<EOC>" in text:
+        raw_records = re.split(r"<EOC>", text)
+    elif "\n\n" in content or "\r\n\r\n" in content:
+        # Non-<EOC> format with blank-line separation (e.g., QRZLogbook).
+        # Merge consecutive non-blank lines into blocks; each block is one record.
+        raw_records = []
+        current_lines = []
+        for line in text.split("\n"):
+            if not line.strip():
+                if current_lines:
+                    raw_records.append("\n".join(current_lines))
+                    current_lines = []
+            else:
+                current_lines.append(line)
+        if current_lines:
+            raw_records.append("\n".join(current_lines))
+    else:
+        # Non-<EOC> format without blank lines — each line is a complete record.
+        raw_records = [line for line in text.split("\n") if line.strip()]
 
     for i, raw_block in enumerate(raw_records):
         if not raw_block.strip():
             continue
 
         line_num = i + 1
-
-        # Skip file header records (start with <ADIF_VER>)
-        if "<ADIF_VER:" in raw_block:
-            continue
 
         record = _parse_record(raw_block)
 

@@ -3,7 +3,7 @@
 
 <h2>Submit a Contact</h2>
 
-<div style="max-width: 580px; width: 100%;">
+<div style="max-width: 580px; width: 100%; padding-bottom: 3rem;">
 
     {% if errors %}
         <div class="alert alert-danger">
@@ -18,29 +18,7 @@
         <div class="alert alert-success">{{ success }}</div>
     {% endif %}
 
-    <!-- ── ADI Upload Section ─────────────────────── -->
-    <div style="margin-bottom: 1.5rem; padding: 14px; background: #f0f6fb; border-radius: 6px;">
-        <button type="button" class="btn btn-secondary" id="adiUploadBtn">
-            Upload ADI
-        </button>
-        <input type="file" id="adiFileInput" accept=".adi,.ADI" style="display:none;">
-
-        <!-- POTA declaration — before file selection -->
-        <div id="adiPotaSection" style="margin-top:12px;">
-            <label style="font-weight:normal; font-size:0.95rem;">Are all contacts in this file from POTA parks?</label>
-            <div style="display:flex; gap:2rem; margin-top:6px;">
-                <label style="font-weight:normal; display:flex; align-items:center; gap:6px; cursor:pointer;">
-                    <input type="radio" name="adi_is_pota" value="yes"> Yes — treat all contacts with park data as POTA
-                </label>
-                <label style="font-weight:normal; display:flex; align-items:center; gap:6px; cursor:pointer;">
-                    <input type="radio" name="adi_is_pota" value="no"> No — ignore any park fields in this file
-                </label>
-            </div>
-        </div>
-
-        <div id="adiPreviewContainer" style="display:none; margin-top: 12px;"></div>
-    </div>
-
+    <!-- ── Manual Contact Entry (Primary) ─────────── -->
     <form method="POST" id="contactForm">
 
         <!-- ── Row 1: Callsigns ── -->
@@ -75,7 +53,7 @@
             <div style="display: flex; gap: 2rem; margin-top: 6px;">
                 <label style="font-weight: normal; display: flex; align-items: center; gap: 6px; cursor: pointer;">
                     <input type="radio" name="mode_type" value="voice" id="mode_voice"
-                           {% if form.get('mode_type') == 'voice' %}checked{% endif %}>
+                           {% if form.get('mode_type') == 'voice' or not form.get('mode_type') %}checked{% endif %}>
                     Voice Simplex
                 </label>
                 <label style="font-weight: normal; display: flex; align-items: center; gap: 6px; cursor: pointer;">
@@ -87,7 +65,7 @@
         </div>
 
         <!-- ── Voice sub-section: POTA? ── -->
-        <div id="voice_section" style="display: none; margin-left: 1rem; padding: 12px; background: #f4f8fc; border-left: 3px solid #30638e; border-radius: 0 4px 4px 0;">
+        <div id="voice_section" style="display: none; margin-left: 1rem; padding: 12px; background: #f4f8fc; border-left: 3px solid #30638e; border-radius: 0 4px 4px 0; margin-top: 0.75rem; margin-bottom: 1rem;">
             <div class="form-group" style="margin-bottom: 0.75rem;">
                 <label>Was this a POTA contact?</label>
                 <div style="display: flex; gap: 2rem; margin-top: 6px;">
@@ -139,7 +117,7 @@
         </div>
 
         <!-- ── Frequency ── -->
-        <div class="form-group" style="margin-top: 1rem;">
+        <div class="form-group" style="margin-top: 1rem; margin-bottom: 0.5rem;">
             <label for="frequency">Frequency (MHz)</label>
             <input type="text"
                    id="frequency"
@@ -159,11 +137,42 @@
         </div>
 
         <!-- ── Submit ── -->
-        <button type="submit" class="btn btn-primary" style="margin-top: 0.5rem;">
+        <button type="submit" class="btn btn-primary" style="margin-top: 1rem;">
             Submit Contact
         </button>
 
     </form>
+
+    <!-- ── Divider ─────────────────────────────────── -->
+    <div style="display:flex; align-items:center; gap:1rem; margin:2rem 0 1.5rem; color:#888;">
+        <hr style="flex:1; border:none; border-top:1px solid #ddd;">
+        <span style="font-size:0.9rem; font-weight:bold; text-transform:uppercase; white-space:nowrap;">OR</span>
+        <hr style="flex:1; border:none; border-top:1px solid #ddd;">
+    </div>
+
+    <!-- ── ADI Upload Section ─────────────────────── -->
+    <div id="adiUploadSection" style="padding: 14px; background: #f0f6fb; border-radius: 6px; margin-bottom: 2rem;">
+        <button type="button" class="btn btn-secondary" id="adiUploadBtn">
+            Upload ADI File
+        </button>
+        <input type="file" id="adiFileInput" accept=".adi,.ADI" style="display:none;">
+
+        <!-- POTA declaration — before file selection -->
+        <div id="adiPotaSection" style="margin-top:12px; display:none;">
+            <label style="font-weight:normal; font-size:0.95rem;">Are all contacts in this file from POTA parks?</label>
+            <div style="display:flex; gap:2rem; margin-top:6px;">
+                <label style="font-weight:normal; display:flex; align-items:center; gap:6px; cursor:pointer;">
+                    <input type="radio" name="adi_is_pota" value="yes"> Yes — treat all contacts with park data as POTA
+                </label>
+                <label style="font-weight:normal; display:flex; align-items:center; gap:6px; cursor:pointer;">
+                    <input type="radio" name="adi_is_pota" value="no"> No — ignore any park fields in this file
+                </label>
+            </div>
+        </div>
+
+        <div id="adiPreviewContainer" style="display:none; margin-top: 12px;"></div>
+    </div>
+
 </div>
 
 <script>
@@ -214,11 +223,21 @@ updatePotaSection();
     const uploadBtn   = document.getElementById('adiUploadBtn');
     const fileInput   = document.getElementById('adiFileInput');
     const previewDiv  = document.getElementById('adiPreviewContainer');
+    const potaSection = document.getElementById('adiPotaSection');
 
-    // Click button → open file picker
+    // Click button — show POTA declaration on first click, open file picker on second
     uploadBtn.addEventListener('click', function() {
         fileInput.value = '';          // reset so same file can be re-selected
-        fileInput.click();
+        previewDiv.style.display = 'none';
+
+        if (potaSection.style.display === 'block') {
+            // Second click — after POTA selection, open file picker
+            fileInput.click();
+        } else {
+            // First click — show POTA declaration and change button text
+            potaSection.style.display = 'block';
+            uploadBtn.textContent = 'Choose File';
+        }
     });
 
     // File selected — read, parse on server, show preview
