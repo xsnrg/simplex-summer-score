@@ -1,15 +1,16 @@
 from flask import (
     Blueprint, render_template, request, redirect,
-    url_for, session, current_app as app
+    url_for, session, current_app as app, jsonify
 )
 from collections import defaultdict
 from .client_auth import admin_required
 from . import db
 from .models import Submission, ScoreMultiplier, User
 from .scoring import score_submissions_for_operator
+from .adi_parser import parse_adi_file, ADIFRecord
+
 
 bp = Blueprint("main", __name__)
-
 
 # -------------------------------------------------------
 # PUBLIC ROUTES
@@ -79,6 +80,164 @@ def submit():
         )
 
     return render_template("submit.html", title="Submit a Contact", form={})
+
+
+@bp.route("/submit/adi_preview", methods=["POST"])
+def adi_preview():
+    """Parse uploaded ADI file and return JSON preview for the client."""
+    f = request.files.get("adi_file")
+    if not f or not f.filename:
+        return jsonify({"success": False, "errors": ["No file provided."]}), 400
+
+    try:
+        content = f.read().decode("utf-8", errors="replace").upper()
+    except Exception as e:
+        return jsonify({"success": False, "errors": [f"Could not read file: {e}"]}), 400
+
+    result = parse_adi_file(content)
+
+    # Apply user-declared POTA flag to records that have a POTA park field
+    is_pota_flag = request.form.get("adi_is_pota", "no") == "yes"
+    if is_pota_flag:
+        for r in result.records:
+            if r.pota_park:
+                r.is_pota = True
+
+    # Build preview payload — only include up to 20 records for the table
+    has_digital = any(r.digital_mode for r in result.records)
+    has_pota = any(r.is_pota for r in result.records)
+
+    return jsonify({
+        "success":       result.success,
+        "count":         len(result.records),
+        "errors":        result.errors,
+        "warnings":      result.warnings,
+        "records": [
+            {
+                "my_call":      r.submitted_by or "",
+                "call":         r.contact_call or "",
+                "qso_date":     r.qso_date or "",
+                "time_on":      r.time_on or "",
+                "mode_type":    r.mode_type or "",
+                "is_pota":      r.is_pota,
+                "pota_park":    r.pota_park or "",
+                "digital_mode": r.digital_mode or "",
+                "freq":         str(r.frequency) if r.frequency else "",
+                "notes":        r.notes or "",
+                "is_duplicate": r.is_duplicate,
+            }
+            for r in result.records[:20]
+        ],
+        "has_digital": has_digital,
+        "has_pota":    has_pota,
+    }), 200
+
+
+@bp.route("/submit/adi_batch", methods=["POST"])
+def adi_batch():
+    """Accept parsed ADI records (from the preview step) and batch-create submissions."""
+    # Build list of dicts from the hidden inputs
+    contacts = []
+    i = 0
+    while True:
+        # Check if this record key exists before processing
+        if f"adi_records[{i}][call]" not in request.form:
+            break
+
+        my_call = request.form.get(f"adi_records[{i}][my_call]", "").strip().upper()
+        call    = request.form.get(f"adi_records[{i}][call]", "").strip().upper()
+        qso_date= request.form.get(f"adi_records[{i}][qso_date]", "").strip()
+        time_on = request.form.get(f"adi_records[{i}][time_on]", "").strip()
+        mode    = request.form.get(f"adi_records[{i}][mode_type]", "voice").strip()
+        is_pota = request.form.get(f"adi_records[{i}][is_pota]") == "yes"
+        pota_park = request.form.get(f"adi_records[{i}][pota_park]", "").strip().upper() if is_pota else None
+        digital_mode = request.form.get(f"adi_records[{i}][digital_mode]", "").strip() or None
+        frequency_str = request.form.get(f"adi_records[{i}][frequency]", "").strip()
+        notes     = request.form.get(f"adi_records[{i}][notes]", "").strip()
+
+        if not call:
+            i += 1
+            continue
+
+        freq_val = None
+        if frequency_str:
+            try:
+                freq_val = float(frequency_str)
+            except ValueError:
+                pass
+
+        contacts.append({
+            "submitted_by": my_call or call,
+            "contact_call": call,
+            "qso_date":     qso_date,
+            "time_on":      time_on,
+            "mode_type":    mode if mode in ("voice", "digital") else "voice",
+            "is_pota":      is_pota,
+            "pota_park":    pota_park,
+            "digital_mode": digital_mode,
+            "frequency":    freq_val,
+            "notes":        notes,
+        })
+
+        i += 1
+        if f"adi_records[{i}][call]" not in request.form:
+            break
+
+    if not contacts:
+        return render_template(
+            "submit.html", title="Submit ADI Contacts",
+            errors=["No contact records received from the file parser."],
+            form={},
+        )
+
+    errors = []
+    created = 0
+    for c in contacts:
+        errs = []
+        if not c["contact_call"]:
+            errs.append("Missing callsign.")
+        if c["mode_type"] == "digital" and not c["digital_mode"]:
+            errs.append(f"{c['contact_call']}: Digital contact requires a digital mode.")
+        if c["is_pota"] and not c["pota_park"]:
+            errs.append(f"{c['contact_call']}: POTA contact requires a park reference.")
+
+        if errs:
+            errors.extend(errs)
+            continue
+
+        sub = Submission(
+            submitted_by   = c["submitted_by"],
+            contact_call   = c["contact_call"],
+            mode_type      = c["mode_type"],
+            is_pota        = c["is_pota"],
+            pota_park      = c["pota_park"],
+            digital_mode   = c["digital_mode"],
+            frequency      = c["frequency"],
+            notes          = c["notes"],
+        )
+        db.session.add(sub)
+        created += 1
+
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        errors.append(f"Database error: {e}")
+
+    if errors and created == 0:
+        return render_template(
+            "submit.html", title="Submit ADI Contacts",
+            errors=errors, form={},
+        )
+
+    msg = f"{created} contact(s) from the ADI file submitted successfully."
+    if errors:
+        msg += f" {len(errors)} record(s) were skipped due to validation errors."
+
+    return render_template(
+        "submit.html", title="Submit ADI Contacts",
+        success=msg, form={},
+    )
 
 
 @bp.route("/leaders")

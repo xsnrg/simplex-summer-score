@@ -3,7 +3,7 @@
 
 <h2>Submit a Contact</h2>
 
-<div style="max-width: 580px; width: 100%;">
+<div style="max-width: 580px; width: 100%; padding-bottom: 3rem;">
 
     {% if errors %}
         <div class="alert alert-danger">
@@ -18,6 +18,7 @@
         <div class="alert alert-success">{{ success }}</div>
     {% endif %}
 
+    <!-- ── Manual Contact Entry (Primary) ─────────── -->
     <form method="POST" id="contactForm">
 
         <!-- ── Row 1: Callsigns ── -->
@@ -52,7 +53,7 @@
             <div style="display: flex; gap: 2rem; margin-top: 6px;">
                 <label style="font-weight: normal; display: flex; align-items: center; gap: 6px; cursor: pointer;">
                     <input type="radio" name="mode_type" value="voice" id="mode_voice"
-                           {% if form.get('mode_type') == 'voice' %}checked{% endif %}>
+                           {% if form.get('mode_type') == 'voice' or not form.get('mode_type') %}checked{% endif %}>
                     Voice Simplex
                 </label>
                 <label style="font-weight: normal; display: flex; align-items: center; gap: 6px; cursor: pointer;">
@@ -64,7 +65,7 @@
         </div>
 
         <!-- ── Voice sub-section: POTA? ── -->
-        <div id="voice_section" style="display: none; margin-left: 1rem; padding: 12px; background: #f4f8fc; border-left: 3px solid #30638e; border-radius: 0 4px 4px 0;">
+        <div id="voice_section" style="display: none; margin-left: 1rem; padding: 12px; background: #f4f8fc; border-left: 3px solid #30638e; border-radius: 0 4px 4px 0; margin-top: 0.75rem; margin-bottom: 1rem;">
             <div class="form-group" style="margin-bottom: 0.75rem;">
                 <label>Was this a POTA contact?</label>
                 <div style="display: flex; gap: 2rem; margin-top: 6px;">
@@ -116,7 +117,7 @@
         </div>
 
         <!-- ── Frequency ── -->
-        <div class="form-group" style="margin-top: 1rem;">
+        <div class="form-group" style="margin-top: 1rem; margin-bottom: 0.5rem;">
             <label for="frequency">Frequency (MHz)</label>
             <input type="text"
                    id="frequency"
@@ -136,11 +137,42 @@
         </div>
 
         <!-- ── Submit ── -->
-        <button type="submit" class="btn btn-primary" style="margin-top: 0.5rem;">
+        <button type="submit" class="btn btn-primary" style="margin-top: 1rem;">
             Submit Contact
         </button>
 
     </form>
+
+    <!-- ── Divider ─────────────────────────────────── -->
+    <div style="display:flex; align-items:center; gap:1rem; margin:2rem 0 1.5rem; color:#888;">
+        <hr style="flex:1; border:none; border-top:1px solid #ddd;">
+        <span style="font-size:0.9rem; font-weight:bold; text-transform:uppercase; white-space:nowrap;">OR</span>
+        <hr style="flex:1; border:none; border-top:1px solid #ddd;">
+    </div>
+
+    <!-- ── ADI Upload Section ─────────────────────── -->
+    <div id="adiUploadSection" style="padding: 14px; background: #f0f6fb; border-radius: 6px; margin-bottom: 2rem;">
+        <button type="button" class="btn btn-secondary" id="adiUploadBtn">
+            Upload ADI File
+        </button>
+        <input type="file" id="adiFileInput" accept=".adi,.ADI" style="display:none;">
+
+        <!-- POTA declaration — before file selection -->
+        <div id="adiPotaSection" style="margin-top:12px; display:none;">
+            <label style="font-weight:normal; font-size:0.95rem;">Are all contacts in this file from POTA parks?</label>
+            <div style="display:flex; gap:2rem; margin-top:6px;">
+                <label style="font-weight:normal; display:flex; align-items:center; gap:6px; cursor:pointer;">
+                    <input type="radio" name="adi_is_pota" value="yes"> Yes — treat all contacts with park data as POTA
+                </label>
+                <label style="font-weight:normal; display:flex; align-items:center; gap:6px; cursor:pointer;">
+                    <input type="radio" name="adi_is_pota" value="no"> No — ignore any park fields in this file
+                </label>
+            </div>
+        </div>
+
+        <div id="adiPreviewContainer" style="display:none; margin-top: 12px;"></div>
+    </div>
+
 </div>
 
 <script>
@@ -185,6 +217,240 @@ document.querySelectorAll('input[name="is_pota"]').forEach(r =>
 // ── Restore state on validation error (form re-render) ─
 updateModeSections();
 updatePotaSection();
+
+// ── ADI Upload ─────────────────────────────────────────
+(function() {
+    const uploadBtn   = document.getElementById('adiUploadBtn');
+    const fileInput   = document.getElementById('adiFileInput');
+    const previewDiv  = document.getElementById('adiPreviewContainer');
+    const potaSection = document.getElementById('adiPotaSection');
+
+    // Click button — show POTA declaration on first click, open file picker on second
+    uploadBtn.addEventListener('click', function() {
+        fileInput.value = '';          // reset so same file can be re-selected
+        previewDiv.style.display = 'none';
+
+        if (potaSection.style.display === 'block') {
+            // Second click — after POTA selection, open file picker
+            fileInput.click();
+        } else {
+            // First click — show POTA declaration and change button text
+            potaSection.style.display = 'block';
+            uploadBtn.textContent = 'Choose File';
+        }
+    });
+
+    // File selected — read, parse on server, show preview
+    fileInput.addEventListener('change', async function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        // Check extension
+        const name = (file.name || '').toLowerCase();
+        if (!name.endsWith('.adi')) {
+            showPreview('<div class="alert alert-danger">Only .ADI files are accepted.</div>');
+            return;
+        }
+
+        // Read file content
+        const reader = new FileReader();
+        reader.onload = async function(evt) {
+            const text = evt.target.result;
+
+            if (!text.trim()) {
+                showPreview('<div class="alert alert-danger">The selected file is empty.</div>');
+                return;
+            }
+
+            // Send to server for parsing/validation
+            const formData = new FormData();
+            formData.append('adi_file', file);
+
+            // Include user's POTA declaration from the radio buttons above
+            const potaRadio = document.querySelector('input[name="adi_is_pota"]:checked');
+            if (potaRadio) {
+                formData.append('adi_is_pota', potaRadio.value);
+            }
+
+            try {
+                uploadBtn.textContent = 'Parsing…';
+                uploadBtn.disabled = true;
+
+                const resp = await fetch('/submit/adi_preview', {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                if (!resp.ok) {
+                    showPreview('<div class="alert alert-danger">Error parsing file. Please try again.</div>');
+                    return;
+                }
+
+                const data = await resp.json();
+                renderPreview(data);
+            } catch (err) {
+                showPreview('<div class="alert alert-danger">Network error: ' + err.message + '</div>');
+            } finally {
+                uploadBtn.textContent = 'Upload ADI';
+                uploadBtn.disabled = false;
+            }
+        };
+        reader.readAsText(file);
+    });
+
+    function showPreview(html) {
+        previewDiv.innerHTML = html;
+        previewDiv.style.display = 'block';
+    }
+
+    function renderPreview(data) {
+        let html = '';
+
+        if (data.success) {
+            // Success — show summary + confirmation button
+            html += '<div class="alert alert-success">';
+            html +=  data.count + ' contact(s) found in file. ';
+            html += '</div>';
+
+            html += '<table style="font-size:0.85rem; margin-top:8px;">';
+            html += '<thead><tr><th>#</th><th>My Call</th><th>Contact</th><th>Date/Time</th><th>Mode</th><th>Freq (MHz)</th>' +
+                    (data.has_digital ? '<th>Digital Mode</th>' : '') +
+                    (data.has_pota ? '<th>POTA Park</th>' : '') + '</tr></thead>';
+            html += '<tbody>';
+
+            for (let i = 0; i < data.records.length && i < 20; i++) {
+                const r = data.records[i];
+                const dateStr = formatDate(r.qso_date);
+                const timeStr = formatTime(r.time_on);
+                html += '<tr>';
+                html += '<td>' + (i+1) + '</td>';
+                html += '<td><strong>' + escHtml(r.my_call || r.call) + '</strong></td>';
+                html += '<td><strong>' + escHtml(r.call) + '</strong></td>';
+                html += '<td>' + dateStr + ' ' + timeStr + '</td>';
+                html += '<td>' + escHtml(r.mode_type) + (r.is_pota ? ' + POTA' : '') + '</td>';
+                html += '<td>' + (r.freq || '-') + '</td>';
+                if (data.has_digital) {
+                    html += '<td>' + escHtml(r.digital_mode || '-') + '</td>';
+                }
+                if (data.has_pota) {
+                    html += '<td>' + escHtml(r.pota_park || '-') + '</td>';
+                }
+                html += '</tr>';
+            }
+
+            if (data.count > 20) {
+                html += '<tr><td colspan="8" style="text-align:center; color:#666;">… and ' + (data.count - 20) + ' more rows</td></tr>';
+            }
+
+            html += '</tbody></table>';
+
+            // Hidden form to submit all records
+            for (let i = 0; i < data.records.length; i++) {
+                const r = data.records[i];
+                html += '<input type="hidden" name="adi_records[' + i + '][my_call]" value="' + escAttr(r.my_call || '') + '">';
+                html += '<input type="hidden" name="adi_records[' + i + '][call]" value="' + escAttr(r.call) + '">';
+                html += '<input type="hidden" name="adi_records[' + i + '][qso_date]" value="' + escAttr(r.qso_date || '') + '">';
+                html += '<input type="hidden" name="adi_records[' + i + '][time_on]" value="' + escAttr(r.time_on || '') + '">';
+                html += '<input type="hidden" name="adi_records[' + i + '][mode_type]" value="' + escAttr(r.mode_type) + '">';
+                if (r.is_pota && r.pota_park) {
+                    html += '<input type="hidden" name="adi_records[' + i + '][is_pota]" value="yes">';
+                    html += '<input type="hidden" name="adi_records[' + i + '][pota_park]" value="' + escAttr(r.pota_park) + '">';
+                } else {
+                    html += '<input type="hidden" name="adi_records[' + i + '][is_pota]" value="no">';
+                }
+                if (r.digital_mode) {
+                    html += '<input type="hidden" name="adi_records[' + i + '][digital_mode]" value="' + escAttr(r.digital_mode) + '">';
+                }
+                html += '<input type="hidden" name="adi_records[' + i + '][frequency]" value="' + (r.freq || '') + '">';
+                if (r.notes) {
+                    html += '<input type="hidden" name="adi_records[' + i + '][notes]" value="' + escAttr(r.notes) + '">';
+                }
+            }
+
+            // Confirmation button — submits the hidden form
+            html += '<button type="button" class="btn btn-success" id="adiConfirmBtn" style="margin-top:10px;">' +
+                    'Submit All (' + data.count + ' contacts)</button>';
+
+        } else {
+            // Errors
+            html += '<div class="alert alert-danger">';
+            html +=  '<strong>Validation errors:</strong><ul style="margin:8px 0 0 0; padding-left:1.2rem;">';
+            for (const err of data.errors) {
+                html += '<li>' + escHtml(err) + '</li>';
+            }
+            html += '</ul></div>';
+
+            if (data.warnings && data.warnings.length > 0) {
+                html += '<div class="alert alert-warning">';
+                html +=  '<strong>Warnings:</strong><ul style="margin:8px 0 0 0; padding-left:1.2rem;">';
+                for (const w of data.warnings) {
+                    html += '<li>' + escHtml(w) + '</li>';
+                }
+                html += '</ul></div>';
+            }
+
+            if (data.count > 0) {
+                html += '<p style="color:#666;">' + data.count + ' record(s) were still parsed. You may submit those below.</p>';
+            }
+        }
+
+        showPreview(html);
+    }
+
+    // Confirm button — submit the form with hidden ADI records
+    document.addEventListener('click', function(e) {
+        if (e.target.id === 'adiConfirmBtn') {
+            // Create a temporary form to POST all the ADI records
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '/submit/adi_batch';
+
+            previewDiv.querySelectorAll('input[type="hidden"]').forEach(function(input) {
+                form.appendChild(input.cloneNode(true));
+            });
+
+            // Also include mode_type if set on the main form
+            const modeRadio = document.querySelector('input[name="mode_type"]:checked');
+            if (modeRadio) {
+                const mField = document.createElement('input');
+                mField.type = 'hidden';
+                mField.name = '_default_mode';
+                mField.value = modeRadio.value;
+                form.appendChild(mField);
+            }
+
+            document.body.appendChild(form);
+            form.submit();
+        }
+    });
+
+    // ── Helpers ────────────────────────────────
+    function formatDate(dateStr) {
+        if (!dateStr || dateStr.length !== 8) return '-';
+        const y = dateStr.substring(0,4);
+        const m = dateStr.substring(4,6);
+        const d = dateStr.substring(6,8);
+        return m + '/' + d + '/' + y;
+    }
+
+    function formatTime(timeStr) {
+        if (!timeStr || timeStr.length !== 6) return '-';
+        const h = timeStr.substring(0,2);
+        const m = timeStr.substring(2,4);
+        const s = timeStr.substring(4,6);
+        return h + ':' + m + (s === '00' ? '' : ':' + s);
+    }
+
+    function escHtml(s) {
+        if (!s) return '';
+        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    function escAttr(s) {
+        if (!s) return '';
+        return String(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+})();
 </script>
 
 {% endblock %}
