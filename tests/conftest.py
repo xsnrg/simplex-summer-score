@@ -9,9 +9,15 @@ def _db_path():
     """Create a temp file path for the test database (session-scoped)."""
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
+
     yield path
-    if os.path.exists(path):
-        os.unlink(path)
+
+    # Ensure cleanup even if finalizer is skipped by pytest
+    try:
+        if os.path.exists(path):
+            os.unlink(path)
+    except OSError:
+        pass
 
 
 @pytest.fixture(scope="session")
@@ -36,14 +42,46 @@ def client(app):
     return app.test_client()
 
 
-def _add_submissions_to_db(app, submissions_list):
-    """Helper to add submissions within the active app context."""
+def _clear_all_tables(app):
+    """Drop and recreate all tables to fully isolate tests."""
+    with app.app_context():
+        from app.models import db
+        db.drop_all()
+        db.create_all()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_and_seed(app, client):
+    """Clear ALL data before AND after each test; seed default submissions."""
+    # ── pre-test: clean slate + seed ────────────────────────
     with app.app_context():
         from app.models import db, Submission
 
+        _clear_all_tables(app)
+
         base_time = datetime.now(timezone.utc) - timedelta(days=5)
-        subs = []
-        for i, sub_data in enumerate(submissions_list):
+        default_subs = [
+            {"submitted_by": "ABC123", "contact_call": "XYZ789", "mode_type": "voice",
+             "is_pota": False, "pota_park": None, "digital_mode": None, "frequency": 146.520,
+             "notes": "Test voice contact"},
+            {"submitted_by": "ABC123", "contact_call": "DEF456", "mode_type": "digital",
+             "is_pota": False, "pota_park": None, "digital_mode": "FT4", "frequency": 14.074,
+             "notes": ""},
+            {"submitted_by": "ABC123", "contact_call": "GHI012", "mode_type": "voice",
+             "is_pota": True, "pota_park": "K-1234", "digital_mode": None, "frequency": 146.520,
+             "notes": "POTA park contact"},
+            {"submitted_by": "ABC123", "contact_call": "JKL345", "mode_type": "voice",
+             "is_pota": False, "pota_park": None, "digital_mode": None, "frequency": 446.000,
+             "notes": ""},
+            {"submitted_by": "DEF456", "contact_call": "ABC123", "mode_type": "voice",
+             "is_pota": False, "pota_park": None, "digital_mode": None, "frequency": 446.000,
+             "notes": ""},
+            {"submitted_by": "DEF456", "contact_call": "MNO789", "mode_type": "voice",
+             "is_pota": False, "pota_park": None, "digital_mode": None, "frequency": 146.520,
+             "notes": "", "is_deleted": True},
+        ]
+
+        for i, sub_data in enumerate(default_subs):
             s = Submission(
                 submitted_by=sub_data.get("submitted_by", "ABC123"),
                 contact_call=sub_data.get("contact_call", f"CALL{i}"),
@@ -59,38 +97,7 @@ def _add_submissions_to_db(app, submissions_list):
             db.session.add(s)
         db.session.commit()
 
+    yield  # run the test
 
-@pytest.fixture(autouse=True)
-def _clear_and_seed(app, client):
-    """Clear all submissions before each test and seed with default data."""
-    from datetime import datetime, timezone
-
-    # Clear any existing data
-    with app.app_context():
-        from app.models import db, Submission
-        db.session.query(Submission).delete()
-        db.session.commit()
-
-    # Seed default data for tests that need it
-    default_subs = [
-        {"submitted_by": "ABC123", "contact_call": "XYZ789", "mode_type": "voice",
-         "is_pota": False, "pota_park": None, "digital_mode": None, "frequency": 146.520,
-         "notes": "Test voice contact"},
-        {"submitted_by": "ABC123", "contact_call": "DEF456", "mode_type": "digital",
-         "is_pota": False, "pota_park": None, "digital_mode": "FT4", "frequency": 14.074,
-         "notes": ""},
-        {"submitted_by": "ABC123", "contact_call": "GHI012", "mode_type": "voice",
-         "is_pota": True, "pota_park": "K-1234", "digital_mode": None, "frequency": 146.520,
-         "notes": "POTA park contact"},
-        {"submitted_by": "ABC123", "contact_call": "JKL345", "mode_type": "voice",
-         "is_pota": False, "pota_park": None, "digital_mode": None, "frequency": 446.000,
-         "notes": ""},
-        {"submitted_by": "DEF456", "contact_call": "ABC123", "mode_type": "voice",
-         "is_pota": False, "pota_park": None, "digital_mode": None, "frequency": 446.000,
-         "notes": ""},
-        {"submitted_by": "DEF456", "contact_call": "MNO789", "mode_type": "voice",
-         "is_pota": False, "pota_park": None, "digital_mode": None, "frequency": 146.520,
-         "notes": "", "is_deleted": True},
-    ]
-
-    _add_submissions_to_db(app, default_subs)
+    # ── post-test: full cleanup so nothing leaks ────────────
+    _clear_all_tables(app)
