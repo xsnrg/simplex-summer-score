@@ -351,6 +351,37 @@ def test_multiple_duplicates():
     assert len(result.duplicates) == 2
 
 
+# ──────── hardening — duplicate detection with CALL fallback ────────
+
+def test_duplicate_detection_with_call_fallback():
+    """When MY_CALL is missing, duplicates should still be detected using CALL."""
+    from app.adi_parser import parse_adi_file
+    recs = [
+        {"CALL": "K1ABC", "QSO_DATE": "20240615", "TIME_ON": "143000", "MODE": "FM"},
+        {"CALL": "K1ABC", "QSO_DATE": "20240615", "TIME_ON": "143000", "MODE": "FM"},
+    ]
+
+    result = parse_adi_file(_adi_text(recs))
+    assert result.success is True
+    assert len(result.records) == 2
+    assert len(result.duplicates) == 1
+    dup = result.duplicates[0]
+    assert dup["duplicate_of_line"] == 1
+
+
+def test_duplicate_call_is_marked_with_fallback():
+    """The duplicate record should have is_duplicate=True when using CALL fallback."""
+    from app.adi_parser import parse_adi_file
+    recs = [
+        {"CALL": "K1ABC", "QSO_DATE": "20240615", "TIME_ON": "143000", "MODE": "FM"},
+        {"CALL": "K1ABC", "QSO_DATE": "20240615", "TIME_ON": "143000", "MODE": "FM"},
+    ]
+
+    result = parse_adi_file(_adi_text(recs))
+    assert result.records[0].is_duplicate is False
+    assert result.records[1].is_duplicate is True
+
+
 # ──────── hardening — line count limit ────────
 
 def test_line_limit_exceeded():
@@ -693,6 +724,58 @@ def test_adi_batch_rejects_duplicate_records(client, app):
         data[f"adi_records[{i}][time_on]"] = rec["time_on"]
         data[f"adi_records[{i}][mode_type]"] = rec["mode_type"]
         data[f"adi_records[{i}][frequency]"] = rec["freq"]
+
+    resp = client.post("/submit/adi_batch", data=data)
+    assert resp.status_code == 200
+
+
+def test_adi_preview_returns_duplicates_in_response_no_my_call(client, app):
+    """Preview route should include duplicate info when MY_CALL is missing."""
+    _seed_subs(app)
+    recs = [
+        {"CALL": "K1ABC", "QSO_DATE": "20240615", "TIME_ON": "143000", "MODE": "FM"},
+        {"CALL": "K1ABC", "QSO_DATE": "20240615", "TIME_ON": "143000", "MODE": "FM"},
+    ]
+
+    resp = client.post("/submit/adi_preview", data={
+        "adi_file": (_adi_file(recs), "test.adi"),
+    }, content_type="multipart/form-data")
+
+    data = resp.get_json()
+    assert data["success"] is True
+    assert len(data["records"]) == 2
+    assert data["records"][0]["is_duplicate"] is False
+    assert data["records"][1]["is_duplicate"] is True
+
+
+def test_adi_batch_rejects_duplicate_records_no_my_call(client, app):
+    """Batch route should skip records flagged as duplicates when MY_CALL is missing."""
+    _seed_subs(app)
+    recs = [
+        {"CALL": "K1ABC", "QSO_DATE": "20240615", "TIME_ON": "143000", "MODE": "FM"},
+        {"CALL": "K1ABC", "QSO_DATE": "20240615", "TIME_ON": "143000", "MODE": "FM"},
+    ]
+
+    # Get preview with duplicates (no MY_CALL)
+    resp = client.post("/submit/adi_preview", data={
+        "adi_file": (_adi_file(recs), "test.adi"),
+    }, content_type="multipart/form-data")
+    preview_data = resp.get_json()
+
+    assert len(preview_data["records"]) == 2
+    assert preview_data["records"][1]["is_duplicate"] is True
+
+    # Build batch POST — only include the non-duplicate record (as frontend would)
+    data = {}
+    for i, rec in enumerate(preview_data["records"]):
+        if rec.get("is_duplicate", False):
+            continue  # skip duplicate records
+        data[f"adi_records[{i}][my_call]"] = rec["my_call"]
+        data[f"adi_records[{i}][call]"] = rec["call"]
+        data[f"adi_records[{i}][qso_date]"] = rec["qso_date"]
+        data[f"adi_records[{i}][time_on]"] = rec["time_on"]
+        data[f"adi_records[{i}][mode_type]"] = rec["mode_type"]
+        data[f"adi_records[{i}][frequency]"] = rec.get("frequency", "")
 
     resp = client.post("/submit/adi_batch", data=data)
     assert resp.status_code == 200

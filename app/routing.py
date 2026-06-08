@@ -124,6 +124,7 @@ def adi_preview():
                 "digital_mode": r.digital_mode or "",
                 "freq":         str(r.frequency) if r.frequency else "",
                 "notes":        r.notes or "",
+                "is_duplicate": r.is_duplicate,
             }
             for r in result.records[:20]
         ],
