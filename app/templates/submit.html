@@ -26,14 +26,14 @@
         <input type="file" id="adiFileInput" accept=".adi,.ADI" style="display:none;">
 
         <!-- POTA declaration — before file selection -->
-        <div id="adiPotaSection" style="margin-top:12px; display:none;">
-            <label style="font-weight:normal; font-size:0.95rem;">Do these contacts include POTA parks?</label>
+        <div id="adiPotaSection" style="margin-top:12px;">
+            <label style="font-weight:normal; font-size:0.95rem;">Are all contacts in this file from POTA parks?</label>
             <div style="display:flex; gap:2rem; margin-top:6px;">
                 <label style="font-weight:normal; display:flex; align-items:center; gap:6px; cursor:pointer;">
-                    <input type="radio" name="adi_is_pota" value="yes"> Yes — some contacts are from POTA parks
+                    <input type="radio" name="adi_is_pota" value="yes"> Yes — treat all contacts with park data as POTA
                 </label>
                 <label style="font-weight:normal; display:flex; align-items:center; gap:6px; cursor:pointer;">
-                    <input type="radio" name="adi_is_pota" value="no" checked> No — these are regular simplex contacts
+                    <input type="radio" name="adi_is_pota" value="no"> No — ignore any park fields in this file
                 </label>
             </div>
         </div>
