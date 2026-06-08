@@ -194,10 +194,12 @@ def _deduplicate_records(result: ADIFParseResult) -> None:
     """
     seen_keys: dict[tuple[str, str, str, str], int] = {}
     for i, rec in enumerate(result.records):
-        if rec.is_duplicate or not rec.submitted_by or not rec.qso_date or not rec.time_on:
+        if rec.is_duplicate or not rec.qso_date or not rec.time_on:
             continue
 
-        key = (rec.submitted_by.upper(), rec.qso_date, rec.time_on, rec.mode_type)
+        # Use submitted_by as primary key; fall back to CALL when MY_CALL is missing
+        dedup_caller = (rec.submitted_by or rec.contact_call).upper()
+        key = (dedup_caller, rec.qso_date, rec.time_on, rec.mode_type)
         if key in seen_keys:
             rec.is_duplicate = True
             original_idx = seen_keys[key] + 1  # 1-based for display
