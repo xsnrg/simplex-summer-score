@@ -4,6 +4,13 @@ from datetime import datetime, timezone, timedelta
 import pytest
 
 
+# ── Playwright base URL fixture ─────────────────────────────
+@pytest.fixture(scope="session")
+def base_url():
+    """Base URL for Playwright browser tests."""
+    return os.environ.get("PLAYWRIGHT_BASE_URL", "http://localhost:5000")
+
+
 @pytest.fixture(scope="session")
 def _db_path():
     """Create a temp file path for the test database (session-scoped)."""
