@@ -105,6 +105,16 @@ def leaderboard():
     return render_template("leaderboard.html", title="Leaderboard", operators=results)
 
 
+@bp.route("/operator/<callsign>")
+def operator_page(callsign):
+    """Page showing all submissions for a specific operator."""
+    subs = Submission.query.filter(
+        db.func.upper(Submission.submitted_by) == callsign.upper(),
+        Submission.is_deleted == False,
+    ).order_by(Submission.submitted_at.desc()).all()
+    return render_template("operator.html", title=f"Operator: {callsign}", operator=callsign, submissions=subs)
+
+
 # -------------------------------------------------------
 # AUTH ROUTES  (login hidden from nav — go to /login directly)
 # -------------------------------------------------------

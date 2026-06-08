@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h1>{{ operator }}</h1>
+
+<p class="update-info">All submissions for this operator.</p>
+
+<div class="table-container">
+    {% if submissions %}
+    <table>
+        <thead>
+            <tr>
+                <th>Rank</th>
+                <th>Contact Call</th>
+                <th>Mode</th>
+                <th>POTA Park</th>
+                <th>Digital Mode</th>
+                <th>Frequency</th>
+                <th>Date/Time</th>
+                <th>Notes</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for sub in submissions %}
+            <tr>
+                <td>{{ loop.index }}</td>
+                <td><strong>{{ sub.contact_call }}</strong></td>
+                <td>{{ sub.mode_type|capitalize if sub.mode_type else '' }}{% if sub.is_pota %} + POTA{% endif %}</td>
+                <td>{{ sub.pota_park or '-' }}</td>
+                <td>{{ sub.digital_mode or '-' }}</td>
+                <td>{{ sub.frequency or '-' }}</td>
+                <td>{{ sub.submitted_at.strftime('%Y-%m-%d %H:%M') if sub.submitted_at else '' }}</td>
+                <td>{{ sub.notes or '-' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>No submissions found for {{ operator }}.</p>
+    {% endif %}
+</div>
+
+<a href="{{ url_for('main.leaderboard') }}">← Back to Leaderboard</a>
+
+{% endblock %}
